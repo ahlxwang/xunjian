@@ -1,0 +1,102 @@
+import asyncio
+import uuid
+import logging
+from datetime import datetime
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from app.database import AsyncSessionLocal
+from app.models.inspection import InspectionTask
+from app.models.risk import RiskItem
+from app.models.rule import Rule
+from app.collectors.prometheus import PrometheusCollector
+from app.engine.rule_engine import RuleEngine
+from app.config import settings
+from app.tasks.celery_app import celery_app
+
+logger = logging.getLogger(__name__)
+
+
+async def run_inspection_sync(
+    db: AsyncSession,
+    trigger_type: str,
+    trigger_user_id: int | None,
+) -> str:
+    """核心巡检逻辑（async），供 Celery task 和测试调用"""
+    task_id = str(uuid.uuid4())
+    start_time = datetime.utcnow()
+
+    # 1. 创建巡检记录
+    inspection = InspectionTask(
+        task_id=task_id,
+        status="running",
+        trigger_type=trigger_type,
+        trigger_user_id=trigger_user_id,
+        start_time=start_time,
+    )
+    db.add(inspection)
+    await db.commit()
+    await db.refresh(inspection)
+
+    try:
+        # 2. 并发采集
+        collector = PrometheusCollector(url=settings.prometheus_url)
+        host_metrics, db_metrics, container_metrics = await asyncio.gather(
+            collector.collect_hosts(),
+            collector.collect_databases(),
+            collector.collect_containers(),
+        )
+
+        # 3. 加载规则
+        result = await db.execute(select(Rule).where(Rule.enabled.is_(True)))
+        rules = result.scalars().all()
+        engine = RuleEngine(rules)
+
+        # 4. 规则匹配，生成风险项
+        risk_items = []
+        for metric in host_metrics:
+            for match in engine.evaluate_host(metric):
+                risk_items.append(RiskItem(
+                    inspection_id=inspection.id,
+                    resource_type="host",
+                    resource_id=metric.resource_id,
+                    resource_name=metric.resource_name,
+                    cloud_provider=metric.cloud_provider,
+                    region=metric.region,
+                    rule_id=match.rule.id,
+                    risk_level=match.risk_level,
+                    risk_title=match.risk_title,
+                    risk_detail=match.risk_detail,
+                    metric_value=match.metric_value,
+                    threshold_value=match.threshold_value,
+                    status="pending",
+                ))
+
+        db.add_all(risk_items)
+
+        # 5. 统计风险数量
+        risk_count: dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+        for item in risk_items:
+            risk_count[item.risk_level] = risk_count.get(item.risk_level, 0) + 1
+
+        # 6. 更新巡检记录
+        inspection.status = "completed"
+        inspection.end_time = datetime.utcnow()
+        inspection.total_resources = len(host_metrics) + len(db_metrics) + len(container_metrics)
+        inspection.risk_count = risk_count
+        await db.commit()
+
+    except Exception as e:
+        logger.error("Inspection %s failed: %s", task_id, e)
+        inspection.status = "failed"
+        inspection.end_time = datetime.utcnow()
+        await db.commit()
+
+    return task_id
+
+
+@celery_app.task(name="app.tasks.inspection_task.run_inspection", bind=True)
+def run_inspection(self, trigger_type: str = "scheduled", trigger_user_id: int | None = None):
+    async def _run():
+        async with AsyncSessionLocal() as db:
+            return await run_inspection_sync(db, trigger_type, trigger_user_id)
+    return asyncio.run(_run())

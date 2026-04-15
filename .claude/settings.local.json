@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -m http.server 8899 --directory /tmp/)",
+      "Bash(where python:*)",
+      "Bash(where python3:*)",
+      "Bash(py --version)",
+      "Bash(cmd:*)",
+      "Bash(dir C:\\\\Users\\\\yuewang43\\\\Downloads\\\\新建文件夹\\\\ClaudeCode\\\\巡检\\\\backend:*)",
+      "Bash(cmd.exe:*)",
+      "Bash(pip show *)",
+      "Bash(git --version)",
+      "Bash(ssh -T git@github.com)"
+    ]
+  }
+}
