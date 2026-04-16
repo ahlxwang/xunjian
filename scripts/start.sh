@@ -115,8 +115,12 @@ check_python() {
     local python_cmd=""
     for cmd in python3.11 python3.10 python3 python; do
         if command -v "$cmd" &> /dev/null; then
+            # 兼容 Python 2.x 的版本检测（不使用 f-string）
             local version
-            version=$("$cmd" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+            version=$("$cmd" -c "import sys; print(str(sys.version_info.major) + '.' + str(sys.version_info.minor))" 2>/dev/null)
+            if [[ -z "$version" ]]; then
+                continue
+            fi
             local major minor
             major=$(echo "$version" | cut -d. -f1)
             minor=$(echo "$version" | cut -d. -f2)
@@ -130,8 +134,24 @@ check_python() {
 
     if [[ -z "$python_cmd" ]]; then
         log_error "未找到 Python 3.10+，请先安装"
-        echo "CentOS 8: sudo dnf install -y python3.11"
-        echo "Ubuntu:   sudo apt-get install -y python3.11 python3.11-venv"
+        echo ""
+        echo "CentOS 7 安装 Python 3.11:"
+        echo "  sudo yum install -y centos-release-scl"
+        echo "  sudo yum install -y rh-python311"
+        echo "  scl enable rh-python311 bash"
+        echo ""
+        echo "或使用源码编译:"
+        echo "  sudo yum install -y gcc openssl-devel bzip2-devel libffi-devel"
+        echo "  wget https://www.python.org/ftp/python/3.11.8/Python-3.11.8.tgz"
+        echo "  tar xzf Python-3.11.8.tgz && cd Python-3.11.8"
+        echo "  ./configure --enable-optimizations"
+        echo "  sudo make altinstall"
+        echo ""
+        echo "CentOS 8/Rocky Linux:"
+        echo "  sudo dnf install -y python3.11"
+        echo ""
+        echo "Ubuntu 22.04:"
+        echo "  sudo apt-get install -y python3.11 python3.11-venv"
         exit 1
     fi
 

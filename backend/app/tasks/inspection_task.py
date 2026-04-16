@@ -9,6 +9,10 @@ from app.models.inspection import InspectionTask
 from app.models.risk import RiskItem
 from app.models.rule import Rule
 from app.collectors.prometheus import PrometheusCollector
+from app.collectors.aliyun import AliyunCollector
+from app.collectors.tencent import TencentCollector
+from app.collectors.huawei import HuaweiCollector
+from app.collectors.k8s import K8sCollector
 from app.engine.rule_engine import RuleEngine
 from app.config import settings
 from app.tasks.celery_app import celery_app
@@ -38,13 +42,55 @@ async def run_inspection_sync(
     await db.refresh(inspection)
 
     try:
-        # 2. 并发采集
-        collector = PrometheusCollector(url=settings.prometheus_url)
-        host_metrics, db_metrics, container_metrics = await asyncio.gather(
-            collector.collect_hosts(),
-            collector.collect_databases(),
-            collector.collect_containers(),
+        # 2. 并发采集 - 使用所有采集器
+        collectors = [
+            PrometheusCollector(url=settings.prometheus_url),
+            AliyunCollector(
+                access_key_id=settings.aliyun_access_key_id,
+                access_key_secret=settings.aliyun_access_key_secret.get_secret_value() if settings.aliyun_access_key_secret else None,
+                region=settings.aliyun_region,
+            ),
+            TencentCollector(
+                secret_id=settings.tencent_secret_id,
+                secret_key=settings.tencent_secret_key.get_secret_value() if settings.tencent_secret_key else None,
+                region=settings.tencent_region,
+            ),
+            HuaweiCollector(
+                access_key=settings.huawei_access_key,
+                secret_key=settings.huawei_secret_key.get_secret_value() if settings.huawei_secret_key else None,
+                region=settings.huawei_region,
+            ),
+            K8sCollector(
+                config_mode=settings.k8s_config_mode,
+                kubeconfig_path=settings.k8s_kubeconfig_path,
+            ),
+        ]
+
+        async def collect_one(collector):
+            hosts, dbs, containers = await asyncio.gather(
+                collector.collect_hosts(),
+                collector.collect_databases(),
+                collector.collect_containers(),
+            )
+            return hosts, dbs, containers
+
+        all_results = await asyncio.gather(
+            *(collect_one(c) for c in collectors),
+            return_exceptions=True
         )
+
+        # 聚合所有采集器的结果
+        host_metrics = []
+        db_metrics = []
+        container_metrics = []
+        for idx, result in enumerate(all_results):
+            if isinstance(result, Exception):
+                logger.error("Collector %s failed: %s", type(collectors[idx]).__name__, str(result)[:200])
+                continue
+            hosts, dbs, containers = result
+            host_metrics.extend(hosts)
+            db_metrics.extend(dbs)
+            container_metrics.extend(containers)
 
         # 3. 加载规则
         result = await db.execute(select(Rule).where(Rule.enabled.is_(True)))
