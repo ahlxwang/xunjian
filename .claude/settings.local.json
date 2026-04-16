@@ -63,7 +63,9 @@
       "Bash(ls /usr/local/bin/py*)",
       "Bash(where py *)",
       "Bash(/c/Windows/System32/cmd.exe /c \"where python\")",
-      "Bash(/c/Windows/System32/cmd.exe /c \"where python && python -m pytest backend/tests/test_inspection_task_multi_collectors.py -v\")"
+      "Bash(/c/Windows/System32/cmd.exe /c \"where python && python -m pytest backend/tests/test_inspection_task_multi_collectors.py -v\")",
+      "Bash(git -C \"C:/Users/yuewang43/Downloads/新建文件夹/ClaudeCode/巡检\" rev-parse --show-toplevel)",
+      "Bash(git -C \"C:/Users/yuewang43/Downloads/新建文件夹/ClaudeCode\" rev-parse --show-toplevel)"
     ]
   }
 }

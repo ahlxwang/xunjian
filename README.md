@@ -10,12 +10,13 @@
 
 1. [系统概述](#1-系统概述)
 2. [快速开始](#2-快速开始)
-3. [系统架构](#3-系统架构)
-4. [功能说明](#4-功能说明)
-5. [API 接口文档](#5-api-接口文档)
-6. [配置说明](#6-配置说明)
-7. [运维指南](#7-运维指南)
-8. [常见问题](#8-常见问题)
+3. [Docker 部署](#3-docker-部署)
+4. [系统架构](#4-系统架构)
+5. [功能说明](#5-功能说明)
+6. [API 接口文档](#6-api-接口文档)
+7. [配置说明](#7-配置说明)
+8. [运维指南](#8-运维指南)
+9. [常见问题](#9-常见问题)
 
 ---
 
@@ -178,7 +179,92 @@ celery -A app.tasks.celery_app.celery beat -l info
 
 ---
 
-## 3. 系统架构
+## 3. Docker 部署
+
+### 3.1 快速部署（推荐）
+
+使用 Docker Compose 一键启动完整系统（包含 PostgreSQL、Redis、API、Worker、Beat）：
+
+```bash
+# 1. 构建镜像
+./build-docker.sh
+
+# 2. 配置环境变量
+cd backend
+cp .env.example .env
+# 编辑 .env 填写云平台凭证（见 2.3 节）
+
+# 3. 启动所有服务
+cd ..
+docker-compose up -d
+
+# 4. 查看日志
+docker-compose logs -f api
+
+# 5. 验证服务
+curl http://localhost:8000/health
+```
+
+**服务架构**:
+- `postgres`: PostgreSQL 15 数据库（端口 5432）
+- `redis`: Redis 7 缓存（端口 6379）
+- `migrate`: 数据库迁移（一次性任务）
+- `api`: FastAPI 服务（端口 8000，2 workers）
+- `worker`: Celery 异步任务处理（4 并发）
+- `beat`: Celery 定时任务调度
+
+### 3.2 独立脚本部署
+
+不使用 Docker Compose 时，可用独立脚本启动：
+
+```bash
+# 1. 构建镜像
+./build-docker.sh
+
+# 2. 配置环境变量（同上）
+
+# 3. 启动所有容器
+./run-docker.sh
+
+# 4. 停止所有容器
+./run-docker.sh stop
+```
+
+### 3.3 常用操作
+
+```bash
+# 查看运行状态
+docker-compose ps
+
+# 重启 API 服务
+docker-compose restart api
+
+# 查看 Worker 日志
+docker-compose logs -f worker
+
+# 进入容器调试
+docker-compose exec api bash
+
+# 停止所有服务
+docker-compose down
+
+# 停止并删除数据卷（危险操作！）
+docker-compose down -v
+```
+
+### 3.4 生产环境建议
+
+1. **资源限制**: 编辑 `docker-compose.yml` 添加 CPU/内存限制
+2. **数据备份**: 定期备份 PostgreSQL 数据卷（`postgres_data`）
+3. **日志管理**: 配置日志驱动（如 `json-file` 限制大小）
+4. **安全加固**: 修改默认密码、使用 Docker Secrets 管理敏感信息
+5. **监控告警**: 集成 Prometheus 监控容器指标
+
+**详细文档**: 参见 [DOCKER.md](./DOCKER.md) 获取完整部署指南、故障排查和性能优化建议。
+
+---
+
+## 4. 系统架构
 
 ### 3.1 整体架构图
 
